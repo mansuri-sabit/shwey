@@ -14,6 +14,7 @@ class TTSService {
     this.openaiApiKey = process.env.OPENAI_API_KEY;
     this.googleApiKey = process.env.GOOGLE_TTS_API_KEY;
     this.elevenlabsApiKey = process.env.ELEVENLABS_API_KEY;
+    this.elevenlabsVoiceId = process.env.ELEVENLABS_VOICE_ID || 'EXAVITQu4vr4xnSDxMaL'; // Default voice
     this.deepgramApiKey = process.env.DEEPGRAM_API_KEY;
   }
 
@@ -22,10 +23,15 @@ class TTSService {
    * Returns audio buffer (MP3 or WAV format depending on provider)
    * 
    * @param {string} text - Text to synthesize
-   * @param {string} voice - Voice ID (provider-specific)
+   * @param {string} voice - Voice ID (provider-specific, optional - uses env var if not provided)
    * @returns {Promise<Buffer>} - Audio buffer
    */
   async synthesize(text, voice = null) {
+    // Use environment variable voice ID if not provided and provider is elevenlabs
+    if (this.provider.toLowerCase() === 'elevenlabs' && !voice) {
+      voice = this.elevenlabsVoiceId;
+    }
+
     console.log(`🎙️ TTS synthesis using ${this.provider}:`, { textLength: text.length, voice });
 
     // Check if provider is configured

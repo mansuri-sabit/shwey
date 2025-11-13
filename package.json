@@ -8,7 +8,9 @@
     "start": "node server.js",
     "dev": "nodemon server.js",
     "call": "node index.js",
-    "server": "node server.js"
+    "server": "node server.js",
+    "send-call": "node send-call.js",
+    "test-elevenlabs": "node test-elevenlabs.js"
   },
   "keywords": [
     "exotel",
