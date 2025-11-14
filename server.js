@@ -384,6 +384,49 @@ wss.on('connection', (ws, request) => {
   // Store WebSocket in session for sending audio
   session.ws = ws;
   
+  // Try to trigger greeting immediately after connection
+  // Some Exotel flows send stream_sid in connection params
+  if (streamSid) {
+    session.streamSid = streamSid;
+    console.log(`   ✅ Stream SID from connection params: ${streamSid}`);
+    // Trigger greeting immediately if we have stream_sid
+    setTimeout(() => {
+      if (!session.greetingSent && session.streamSid && ws.readyState === 1) {
+        console.log(`   🚀 Triggering greeting immediately after connection...`);
+        synthesizeAndStreamGreeting(ws, session).catch(error => {
+          console.error(`❌ Error synthesizing greeting for Call ${session.callId}:`, error);
+        });
+      }
+    }, 500); // Small delay to ensure connection is stable
+  }
+  
+  // Fallback: If we don't get stream_sid within 3 seconds, try to trigger greeting anyway
+  // Some Exotel flows might send stream_sid later, but we should still try
+  const greetingTimeout = setTimeout(() => {
+    if (!session.greetingSent && !session.streamSid) {
+      console.log(`   ⚠️  [${callId}] No stream_sid received after 3 seconds, checking if we can proceed...`);
+      // Check if we have any stream_sid from events
+      if (session.streamSid && ws.readyState === 1) {
+        console.log(`   🚀 Triggering greeting after timeout with stream_sid: ${session.streamSid}`);
+        synthesizeAndStreamGreeting(ws, session).catch(error => {
+          console.error(`❌ Error synthesizing greeting after timeout:`, error);
+        });
+      }
+    }
+  }, 3000);
+  
+  // Clear timeout if greeting is sent before timeout
+  const originalGreetingSent = session.greetingSent;
+  Object.defineProperty(session, 'greetingSent', {
+    get() { return originalGreetingSent; },
+    set(value) {
+      if (value === true) {
+        clearTimeout(greetingTimeout);
+      }
+      originalGreetingSent = value;
+    }
+  });
+  
   // Don't send greeting immediately - wait for start event or first media event
   // Exotel needs to send stream_sid first before we can send audio
   console.log(`⏳ [${callId}] Waiting for Exotel to send stream_sid before sending greeting...`);
@@ -411,14 +454,26 @@ function handleStartEvent(ws, session, message) {
   // Session is now active
   session.isActive = true;
   
-  // Send greeting now that we have stream_sid
+  // CRITICAL: Send greeting IMMEDIATELY now that we have stream_sid
   if (!session.greetingSent && session.streamSid) {
-    console.log(`   🚀 Triggering greeting synthesis with stream_sid: ${session.streamSid}`);
+    console.log(`   🚀 CRITICAL: Triggering greeting synthesis IMMEDIATELY with stream_sid: ${session.streamSid}`);
+    // Trigger immediately
     synthesizeAndStreamGreeting(ws, session).catch(error => {
       console.error(`❌ Error synthesizing greeting for Call ${session.callId}:`, error);
+      // Retry once after 1 second if failed
+      setTimeout(() => {
+        if (!session.greetingSent && session.streamSid && ws.readyState === 1) {
+          console.log(`   🔄 Retrying greeting synthesis after error...`);
+          synthesizeAndStreamGreeting(ws, session).catch(err => {
+            console.error(`❌ Retry failed:`, err);
+          });
+        }
+      }, 1000);
     });
   } else if (!session.streamSid) {
-    console.log(`   ⚠️  Start event received but no stream_sid found`);
+    console.log(`   ⚠️  Start event received but no stream_sid found - will wait for media event`);
+  } else if (session.greetingSent) {
+    console.log(`   ✅ Greeting already sent, skipping`);
   }
 }
 
@@ -437,12 +492,26 @@ function handleMediaEvent(ws, session, message) {
     session.streamSid = message.stream_sid || message.streamSid;
     console.log(`   ✅ Stream SID captured from media event: ${session.streamSid}`);
     
-    // If greeting hasn't been sent yet and we now have stream_sid, send it
+    // CRITICAL: If greeting hasn't been sent yet and we now have stream_sid, send it IMMEDIATELY
     if (!session.greetingSent) {
-      console.log(`   🚀 Triggering greeting synthesis with stream_sid: ${session.streamSid}`);
-      synthesizeAndStreamGreeting(ws, session).catch(error => {
-        console.error(`❌ Error synthesizing greeting for Call ${session.callId}:`, error);
-      });
+      console.log(`   🚀 CRITICAL: Triggering greeting synthesis IMMEDIATELY with stream_sid: ${session.streamSid}`);
+      // Use setTimeout(0) to ensure it runs in next event loop, but immediately
+      setTimeout(() => {
+        if (!session.greetingSent && session.streamSid && ws.readyState === 1) {
+          synthesizeAndStreamGreeting(ws, session).catch(error => {
+            console.error(`❌ Error synthesizing greeting for Call ${session.callId}:`, error);
+            // Retry once after 1 second if failed
+            setTimeout(() => {
+              if (!session.greetingSent && session.streamSid && ws.readyState === 1) {
+                console.log(`   🔄 Retrying greeting synthesis...`);
+                synthesizeAndStreamGreeting(ws, session).catch(err => {
+                  console.error(`❌ Retry failed:`, err);
+                });
+              }
+            }, 1000);
+          });
+        }
+      }, 0);
     }
   }
   
@@ -621,6 +690,15 @@ async function synthesizeAndStreamGreeting(ws, session) {
   // Check WebSocket is ready
   if (ws.readyState !== 1) {
     console.log(`⚠️  WebSocket not ready (state: ${ws.readyState}) for Call ${session.callId}, waiting...`);
+    // Wait a bit and retry if WebSocket becomes ready
+    setTimeout(() => {
+      if (ws.readyState === 1 && !session.greetingSent && session.streamSid) {
+        console.log(`   🔄 WebSocket ready now, retrying greeting...`);
+        synthesizeAndStreamGreeting(ws, session).catch(err => {
+          console.error(`❌ Retry failed:`, err);
+        });
+      }
+    }, 500);
     return;
   }
 
