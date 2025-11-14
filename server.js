@@ -400,32 +400,25 @@ wss.on('connection', (ws, request) => {
     }, 500); // Small delay to ensure connection is stable
   }
   
-  // Fallback: If we don't get stream_sid within 3 seconds, try to trigger greeting anyway
-  // Some Exotel flows might send stream_sid later, but we should still try
+  // Fallback: If we don't get stream_sid within 5 seconds, log a warning
+  // This helps debug if stream_sid is not coming
   const greetingTimeout = setTimeout(() => {
     if (!session.greetingSent && !session.streamSid) {
-      console.log(`   ⚠️  [${callId}] No stream_sid received after 3 seconds, checking if we can proceed...`);
-      // Check if we have any stream_sid from events
-      if (session.streamSid && ws.readyState === 1) {
-        console.log(`   🚀 Triggering greeting after timeout with stream_sid: ${session.streamSid}`);
+      console.log(`   ⚠️  [${callId}] WARNING: No stream_sid received after 5 seconds!`);
+      console.log(`   ⚠️  [${callId}] This might indicate an issue with Exotel connection.`);
+    } else if (!session.greetingSent && session.streamSid) {
+      // We have stream_sid but greeting not sent - try now
+      console.log(`   🚀 Triggering greeting after timeout check with stream_sid: ${session.streamSid}`);
+      if (ws.readyState === 1) {
         synthesizeAndStreamGreeting(ws, session).catch(error => {
           console.error(`❌ Error synthesizing greeting after timeout:`, error);
         });
       }
     }
-  }, 3000);
+  }, 5000);
   
-  // Clear timeout if greeting is sent before timeout
-  const originalGreetingSent = session.greetingSent;
-  Object.defineProperty(session, 'greetingSent', {
-    get() { return originalGreetingSent; },
-    set(value) {
-      if (value === true) {
-        clearTimeout(greetingTimeout);
-      }
-      originalGreetingSent = value;
-    }
-  });
+  // Store timeout reference in session to clear it when greeting is sent
+  session.greetingTimeout = greetingTimeout;
   
   // Don't send greeting immediately - wait for start event or first media event
   // Exotel needs to send stream_sid first before we can send audio
@@ -704,6 +697,12 @@ async function synthesizeAndStreamGreeting(ws, session) {
 
   // Mark as sent to prevent duplicates (do this early to prevent race conditions)
   session.greetingSent = true;
+  
+  // Clear the greeting timeout if it exists
+  if (session.greetingTimeout) {
+    clearTimeout(session.greetingTimeout);
+    delete session.greetingTimeout;
+  }
 
   try {
     // Get greeting text from environment or use default
