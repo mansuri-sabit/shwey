@@ -3,7 +3,10 @@
  * Extracts text content from PDF files
  */
 
-import pdf from 'pdf-parse';
+// pdf-parse uses CommonJS, so we need to import it differently
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const pdfParse = require('pdf-parse');
 
 class PDFParser {
   /**
@@ -13,7 +16,7 @@ class PDFParser {
    */
   async parsePDF(pdfBuffer) {
     try {
-      const data = await pdf(pdfBuffer);
+      const data = await pdfParse(pdfBuffer);
       
       return {
         text: data.text,
