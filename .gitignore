@@ -25,3 +25,7 @@ Thumbs.db
 # Reference/Backup folders
 backendRef/
 
+# Uploads
+uploads/
+*.pdf
+

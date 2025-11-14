@@ -10,8 +10,18 @@ import { ExotelVoicebotCaller } from './index.js';
 import dotenv from 'dotenv';
 import { ttsService } from './utils/ttsService.js';
 import { audioConverter } from './utils/audioConverter.js';
+import { pdfParser } from './utils/pdfParser.js';
+import { aiService } from './utils/aiService.js';
+import { sttService } from './utils/sttService.js';
+import multer from 'multer';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync } from 'fs';
 
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -29,22 +39,181 @@ const wss = new WebSocketServer({
 // Session management
 const activeSessions = new Map(); // callId -> session data
 
+// PDF storage
+const pdfStorage = new Map(); // pdfId -> { content, uploadedAt }
+
+// Ensure uploads directory exists
+const uploadsDir = join(__dirname, 'uploads');
+if (!existsSync(uploadsDir)) {
+  mkdirSync(uploadsDir, { recursive: true });
+}
+
+// Configure multer for file uploads
+const upload = multer({
+  dest: uploadsDir,
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+});
+
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(express.static('public')); // Serve static files
 
-// Health check endpoint
+// Health check endpoint - serve UI if no specific route
 app.get('/', (req, res) => {
-  res.json({
-    status: 'ok',
-    service: 'Exotel Voicebot Caller',
-    message: 'Service is running. Use POST /call to initiate a call.'
-  });
+  // Check if request wants HTML (browser)
+  if (req.headers.accept && req.headers.accept.includes('text/html')) {
+    res.sendFile(join(__dirname, 'public', 'index.html'));
+  } else {
+    res.json({
+      status: 'ok',
+      service: 'Exotel Voicebot Caller',
+      message: 'Service is running. Visit / for web UI or use POST /call to initiate a call.'
+    });
+  }
 });
 
 // Health check for Render
 app.get('/health', (req, res) => {
   res.json({ status: 'healthy', timestamp: new Date().toISOString() });
+});
+
+/**
+ * PDF Upload Endpoint
+ * POST /api/upload-pdf
+ */
+app.post('/api/upload-pdf', upload.single('pdf'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No PDF file uploaded' });
+    }
+
+    // Read PDF file
+    const pdfBuffer = readFileSync(req.file.path);
+    
+    // Parse PDF
+    const pdfData = await pdfParser.parsePDF(pdfBuffer);
+    const pdfContent = pdfParser.cleanText(pdfData.text);
+
+    // Generate unique PDF ID
+    const pdfId = `pdf_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+
+    // Store PDF content
+    pdfStorage.set(pdfId, {
+      content: pdfContent,
+      originalText: pdfData.text,
+      numPages: pdfData.numPages,
+      uploadedAt: new Date().toISOString()
+    });
+
+    // Clean up uploaded file
+    unlinkSync(req.file.path);
+
+    res.json({
+      success: true,
+      pdfId,
+      content: pdfContent.substring(0, 2000), // Preview
+      numPages: pdfData.numPages,
+      textLength: pdfContent.length
+    });
+  } catch (error) {
+    console.error('PDF upload error:', error);
+    if (req.file && existsSync(req.file.path)) {
+      unlinkSync(req.file.path);
+    }
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Send Call with PDF
+ * POST /api/send-call
+ */
+app.post('/api/send-call', async (req, res) => {
+  try {
+    const { to, from, pdfId } = req.body;
+
+    if (!to || !from) {
+      return res.status(400).json({ error: 'Phone numbers required' });
+    }
+
+    if (pdfId && !pdfStorage.has(pdfId)) {
+      return res.status(400).json({ error: 'PDF not found' });
+    }
+
+    const config = {
+      apiKey: process.env.EXOTEL_API_KEY,
+      apiToken: process.env.EXOTEL_API_TOKEN,
+      sid: process.env.EXOTEL_SID,
+      subdomain: process.env.EXOTEL_SUBDOMAIN || 'api.exotel.com',
+      appId: process.env.EXOTEL_APP_ID,
+      callerId: from
+    };
+
+    // Validate config
+    if (!config.apiKey || !config.apiToken || !config.sid || !config.appId || !config.callerId) {
+      return res.status(400).json({ error: 'Missing Exotel configuration' });
+    }
+
+    // Store PDF ID in custom field for later retrieval
+    const customField = pdfId ? `pdf_${pdfId}` : null;
+
+    const caller = new ExotelVoicebotCaller(config);
+    const result = await caller.makeCall(to, from, customField);
+
+    if (result.success) {
+      console.log(`📄 PDF ${pdfId} linked to call ${result.callSid}`);
+      res.json({
+        success: true,
+        callSid: result.callSid,
+        message: `Call initiated successfully to ${to}`,
+        pdfId: pdfId || null
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: result.error
+      });
+    }
+  } catch (error) {
+    console.error('Send call error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Get Active Calls
+ * GET /api/active-calls
+ */
+app.get('/api/active-calls', (req, res) => {
+  const calls = Array.from(activeSessions.entries()).map(([callId, session]) => ({
+    callId: session.callId,
+    status: session.isActive ? 'active' : 'inactive',
+    pdfId: session.pdfId || null,
+    connectedAt: session.connectedAt
+  }));
+
+  res.json({ calls });
+});
+
+/**
+ * Get PDF Content
+ * GET /api/pdf/:pdfId
+ */
+app.get('/api/pdf/:pdfId', (req, res) => {
+  const { pdfId } = req.params;
+  const pdfData = pdfStorage.get(pdfId);
+
+  if (!pdfData) {
+    return res.status(404).json({ error: 'PDF not found' });
+  }
+
+  res.json({
+    pdfId,
+    content: pdfData.content,
+    numPages: pdfData.numPages,
+    uploadedAt: pdfData.uploadedAt
+  });
 });
 
 /**
@@ -174,7 +343,11 @@ function handleVoicebotConnect(req, res) {
     // Exotel WebSocket endpoint - supports both /voicebot/ws and /voice-stream paths
     // Default to /voice-stream if WS_PATH not set (matches Exotel flow configuration)
     const wsPath = process.env.WS_PATH || '/voice-stream';
-    const websocketUrl = `${wsProtocol}://${wsHost}${wsPath}?call_id=${callIdentifier}`;
+    // Pass both call_id and customField (for PDF ID) in WebSocket URL
+    let websocketUrl = `${wsProtocol}://${wsHost}${wsPath}?call_id=${callIdentifier}`;
+    if (customField) {
+      websocketUrl += `&customField=${encodeURIComponent(customField)}`;
+    }
     
     // Return JSON response with WebSocket URL (matches backendRef pattern)
     const response = {
@@ -277,6 +450,11 @@ class VoiceSession {
     this.audioBuffer = [];
     this.isActive = true;
     this.greetingSent = false; // Track if greeting has been sent
+    this.pdfId = null; // PDF ID for this call
+    this.pdfContent = null; // PDF content for Q&A
+    this.conversationHistory = []; // Store conversation for context
+    this.lastSTTTime = null; // Track last STT processing
+    this.audioAccumulator = Buffer.alloc(0); // Accumulate audio for STT
   }
 }
 
@@ -294,17 +472,31 @@ wss.on('connection', (ws, request) => {
                  `call_${Date.now()}`;
   
   const streamSid = url.searchParams.get('stream_sid') || null;
+  const customField = url.searchParams.get('customField') || url.searchParams.get('CustomField');
   
   console.log(`📞 New Exotel WebSocket connection`);
   console.log(`   Path: ${path}`);
   console.log(`   Call ID: ${callId}`);
   console.log(`   Stream SID: ${streamSid || 'pending'}`);
+  console.log(`   Custom Field: ${customField || 'none'}`);
   console.log(`   Remote: ${request.socket.remoteAddress}`);
   console.log(`   User-Agent: ${request.headers['user-agent'] || 'unknown'}`);
   console.log(`   Origin: ${request.headers['origin'] || 'none'}`);
   
   // Create session
   const session = new VoiceSession(callId, streamSid);
+  
+  // Check if custom field contains PDF ID
+  if (customField && customField.startsWith('pdf_')) {
+    const pdfId = customField.replace('pdf_', '');
+    const pdfData = pdfStorage.get(pdfId);
+    if (pdfData) {
+      session.pdfId = pdfId;
+      session.pdfContent = pdfData.content;
+      console.log(`   📄 PDF linked: ${pdfId} (${pdfData.content.length} chars)`);
+    }
+  }
+  
   activeSessions.set(callId, session);
   
   // Handle incoming messages from Exotel
@@ -524,18 +716,85 @@ function handleMediaEvent(ws, session, message) {
     
     // Accumulate audio for processing
     session.audioBuffer.push(audioChunk);
+    session.audioAccumulator = Buffer.concat([session.audioAccumulator, audioChunk]);
     
-    // TODO: Process audio here
-    // Options:
-    // 1. Send to Speech-to-Text service (Deepgram, Google, etc.)
-    // 2. Send to AI for processing
-    // 3. Save to file for later processing
+    // Process audio for STT every 2 seconds (accumulate ~16KB of audio at 8kHz)
+    const now = Date.now();
+    const shouldProcessSTT = !session.lastSTTTime || (now - session.lastSTTTime) > 2000;
+    const hasEnoughAudio = session.audioAccumulator.length >= 16000; // ~1 second at 8kHz
     
-    // Example: Echo back (for testing - remove in production)
-    // sendAudioChunkToExotel(ws, session, audioChunk);
+    if (shouldProcessSTT && hasEnoughAudio && session.pdfContent) {
+      session.lastSTTTime = now;
+      
+      // Process STT asynchronously (don't block)
+      processUserSpeech(ws, session).catch(error => {
+        console.error(`❌ Error processing speech for Call ${session.callId}:`, error);
+      });
+    }
     
   } catch (error) {
     console.error(`❌ Error decoding audio payload for Call ${session.callId}:`, error);
+  }
+}
+
+/**
+ * Process user speech: STT -> AI -> TTS -> Stream
+ */
+async function processUserSpeech(ws, session) {
+  if (!session.pdfContent) {
+    return; // No PDF content, skip processing
+  }
+
+  try {
+    // Extract audio for STT
+    const audioForSTT = session.audioAccumulator;
+    session.audioAccumulator = Buffer.alloc(0); // Reset accumulator
+
+    if (audioForSTT.length < 8000) {
+      return; // Not enough audio
+    }
+
+    console.log(`🎤 [${session.callId}] Processing speech (${audioForSTT.length} bytes)...`);
+
+    // Step 1: Speech-to-Text
+    const userText = await sttService.transcribe(audioForSTT);
+    console.log(`   📝 User said: "${userText}"`);
+
+    if (!userText || userText.trim().length === 0) {
+      return; // No speech detected
+    }
+
+    // Step 2: Get AI answer based on PDF
+    const answer = await aiService.answerQuestion(userText, session.pdfContent);
+    console.log(`   🤖 AI Answer: "${answer}"`);
+
+    // Step 3: Convert answer to speech
+    const audioBuffer = await ttsService.synthesize(answer);
+    const pcmBuffer = await audioConverter.convertToPCM(audioBuffer);
+
+    // Step 4: Stream answer to user
+    await streamPCMToExotel(ws, session, pcmBuffer);
+
+    console.log(`✅ [${session.callId}] Response sent to user`);
+
+    // Store conversation
+    session.conversationHistory.push({
+      question: userText,
+      answer: answer,
+      timestamp: new Date()
+    });
+
+  } catch (error) {
+    console.error(`❌ [${session.callId}] Error processing speech:`, error);
+    // Send error message to user
+    try {
+      const errorMsg = "I'm sorry, I didn't catch that. Could you please repeat?";
+      const audioBuffer = await ttsService.synthesize(errorMsg);
+      const pcmBuffer = await audioConverter.convertToPCM(audioBuffer);
+      await streamPCMToExotel(ws, session, pcmBuffer);
+    } catch (ttsError) {
+      console.error(`❌ Error sending error message:`, ttsError);
+    }
   }
 }
 
@@ -705,14 +964,29 @@ async function synthesizeAndStreamGreeting(ws, session) {
   }
 
   try {
-    // Get greeting text from environment or use default
-    const greetingText = process.env.GREETING_TEXT || 
-                        'Hello! Thank you for calling. How can I help you today?';
+    // Get greeting text - use AI-generated if PDF available, otherwise default
+    let greetingText;
+    if (session.pdfContent) {
+      try {
+        greetingText = await aiService.generateGreeting(session.pdfContent);
+        console.log(`   📄 Using AI-generated greeting based on PDF`);
+      } catch (error) {
+        console.warn(`   ⚠️  AI greeting generation failed, using default`);
+        greetingText = process.env.GREETING_TEXT || 
+                      'Hello! Thank you for calling. I can answer questions about the document. How can I help you?';
+      }
+    } else {
+      greetingText = process.env.GREETING_TEXT || 
+                    'Hello! Thank you for calling. How can I help you today?';
+    }
     
     console.log(`🎙️ [${session.callId}] Starting greeting synthesis...`);
     console.log(`   Text: "${greetingText}"`);
     console.log(`   Stream SID: ${session.streamSid}`);
     console.log(`   WebSocket State: ${ws.readyState}`);
+    if (session.pdfId) {
+      console.log(`   📄 PDF: ${session.pdfId}`);
+    }
 
     // Step 1: Call TTS API
     console.log(`   Step 1: Calling TTS API...`);

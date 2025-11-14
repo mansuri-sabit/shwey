@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Exotel Voicebot - PDF Q&A System</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+
+        .content {
+            padding: 40px;
+        }
+
+        .section {
+            margin-bottom: 40px;
+            padding: 30px;
+            background: #f8f9fa;
+            border-radius: 15px;
+            border: 2px solid #e9ecef;
+        }
+
+        .section h2 {
+            color: #667eea;
+            margin-bottom: 20px;
+            font-size: 1.8em;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .section h2::before {
+            content: "📋";
+            font-size: 1.2em;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 600;
+            font-size: 1.1em;
+        }
+
+        input[type="text"],
+        input[type="tel"],
+        select {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 1em;
+            transition: border-color 0.3s;
+        }
+
+        input:focus,
+        select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .file-upload {
+            position: relative;
+            display: inline-block;
+            width: 100%;
+        }
+
+        .file-upload input[type="file"] {
+            position: absolute;
+            opacity: 0;
+            width: 100%;
+            height: 100%;
+            cursor: pointer;
+        }
+
+        .file-upload-label {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+            border: 3px dashed #667eea;
+            border-radius: 15px;
+            background: white;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-align: center;
+        }
+
+        .file-upload-label:hover {
+            background: #f0f4ff;
+            border-color: #764ba2;
+        }
+
+        .file-upload-label.dragover {
+            background: #e7f0ff;
+            border-color: #667eea;
+        }
+
+        .file-info {
+            margin-top: 15px;
+            padding: 15px;
+            background: #e7f0ff;
+            border-radius: 8px;
+            display: none;
+        }
+
+        .file-info.show {
+            display: block;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 8px;
+            font-size: 1.1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            width: 100%;
+            margin-top: 10px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .status {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            display: none;
+        }
+
+        .status.show {
+            display: block;
+        }
+
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        .pdf-preview {
+            margin-top: 20px;
+            padding: 20px;
+            background: white;
+            border-radius: 8px;
+            border: 2px solid #e9ecef;
+            max-height: 400px;
+            overflow-y: auto;
+            display: none;
+        }
+
+        .pdf-preview.show {
+            display: block;
+        }
+
+        .pdf-preview h3 {
+            color: #667eea;
+            margin-bottom: 15px;
+        }
+
+        .pdf-content {
+            white-space: pre-wrap;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            line-height: 1.6;
+            color: #333;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+            margin-right: 10px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        @media (max-width: 768px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📞 Exotel Voicebot</h1>
+            <p>PDF-based Q&A Call System</p>
+        </div>
+
+        <div class="content">
+            <!-- PDF Upload Section -->
+            <div class="section">
+                <h2>PDF Upload</h2>
+                <div class="form-group">
+                    <label>Upload PDF File</label>
+                    <div class="file-upload">
+                        <input type="file" id="pdfFile" accept=".pdf" />
+                        <label for="pdfFile" class="file-upload-label" id="fileLabel">
+                            <div>
+                                <div style="font-size: 3em; margin-bottom: 10px;">📄</div>
+                                <div style="font-size: 1.2em; font-weight: 600; color: #667eea;">
+                                    Click to upload or drag & drop
+                                </div>
+                                <div style="color: #666; margin-top: 5px;">PDF files only</div>
+                            </div>
+                        </label>
+                    </div>
+                    <div class="file-info" id="fileInfo"></div>
+                    <button class="btn" id="uploadBtn" onclick="uploadPDF()">
+                        Upload PDF
+                    </button>
+                    <div class="status" id="uploadStatus"></div>
+                </div>
+
+                <div class="pdf-preview" id="pdfPreview">
+                    <h3>📄 PDF Content Preview</h3>
+                    <div class="pdf-content" id="pdfContent"></div>
+                </div>
+            </div>
+
+            <!-- Call Configuration Section -->
+            <div class="section">
+                <h2>Call Configuration</h2>
+                <div class="grid">
+                    <div class="form-group">
+                        <label>Exotel Phone Number (Caller ID)</label>
+                        <input type="tel" id="callerId" placeholder="07948516111" value="07948516111" />
+                    </div>
+                    <div class="form-group">
+                        <label>Target Phone Number (To Call)</label>
+                        <input type="tel" id="targetNumber" placeholder="+919324606985" value="+919324606985" />
+                    </div>
+                </div>
+                <button class="btn" id="callBtn" onclick="sendCall()" disabled>
+                    📞 Send Call
+                </button>
+                <div class="status" id="callStatus"></div>
+            </div>
+
+            <!-- Active Calls Section -->
+            <div class="section">
+                <h2>Active Calls</h2>
+                <div id="activeCalls">
+                    <p style="color: #666;">No active calls</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let uploadedPDFId = null;
+        let uploadedPDFContent = null;
+
+        // File upload handling
+        const fileInput = document.getElementById('pdfFile');
+        const fileLabel = document.getElementById('fileLabel');
+        const fileInfo = document.getElementById('fileInfo');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const uploadStatus = document.getElementById('uploadStatus');
+
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                fileInfo.innerHTML = `
+                    <strong>📄 File:</strong> ${file.name}<br>
+                    <strong>📊 Size:</strong> ${(file.size / 1024).toFixed(2)} KB<br>
+                    <strong>📅 Type:</strong> ${file.type}
+                `;
+                fileInfo.classList.add('show');
+                uploadBtn.disabled = false;
+            }
+        });
+
+        // Drag and drop
+        fileLabel.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            fileLabel.classList.add('dragover');
+        });
+
+        fileLabel.addEventListener('dragleave', () => {
+            fileLabel.classList.remove('dragover');
+        });
+
+        fileLabel.addEventListener('drop', (e) => {
+            e.preventDefault();
+            fileLabel.classList.remove('dragover');
+            const file = e.dataTransfer.files[0];
+            if (file && file.type === 'application/pdf') {
+                fileInput.files = e.dataTransfer.files;
+                fileInput.dispatchEvent(new Event('change'));
+            }
+        });
+
+        // Upload PDF
+        async function uploadPDF() {
+            const file = fileInput.files[0];
+            if (!file) {
+                showStatus('uploadStatus', 'Please select a PDF file', 'error');
+                return;
+            }
+
+            uploadBtn.disabled = true;
+            uploadBtn.innerHTML = '<span class="loading"></span>Uploading...';
+
+            const formData = new FormData();
+            formData.append('pdf', file);
+
+            try {
+                const response = await fetch('/api/upload-pdf', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    uploadedPDFId = data.pdfId;
+                    uploadedPDFContent = data.content;
+                    
+                    showStatus('uploadStatus', `✅ PDF uploaded successfully! ID: ${uploadedPDFId}`, 'success');
+                    
+                    // Show PDF preview
+                    document.getElementById('pdfContent').textContent = 
+                        data.content.substring(0, 2000) + (data.content.length > 2000 ? '...' : '');
+                    document.getElementById('pdfPreview').classList.add('show');
+                    
+                    // Enable call button
+                    document.getElementById('callBtn').disabled = false;
+                } else {
+                    showStatus('uploadStatus', `❌ Error: ${data.error}`, 'error');
+                }
+            } catch (error) {
+                showStatus('uploadStatus', `❌ Error: ${error.message}`, 'error');
+            } finally {
+                uploadBtn.disabled = false;
+                uploadBtn.innerHTML = 'Upload PDF';
+            }
+        }
+
+        // Send Call
+        async function sendCall() {
+            if (!uploadedPDFId) {
+                showStatus('callStatus', 'Please upload a PDF first', 'error');
+                return;
+            }
+
+            const callerId = document.getElementById('callerId').value;
+            const targetNumber = document.getElementById('targetNumber').value;
+
+            if (!callerId || !targetNumber) {
+                showStatus('callStatus', 'Please fill all fields', 'error');
+                return;
+            }
+
+            const callBtn = document.getElementById('callBtn');
+            callBtn.disabled = true;
+            callBtn.innerHTML = '<span class="loading"></span>Sending Call...';
+
+            try {
+                const response = await fetch('/api/send-call', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        to: targetNumber,
+                        from: callerId,
+                        pdfId: uploadedPDFId
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    showStatus('callStatus', `✅ Call initiated successfully! Call SID: ${data.callSid}`, 'success');
+                    updateActiveCalls();
+                } else {
+                    showStatus('callStatus', `❌ Error: ${data.error}`, 'error');
+                }
+            } catch (error) {
+                showStatus('callStatus', `❌ Error: ${error.message}`, 'error');
+            } finally {
+                callBtn.disabled = false;
+                callBtn.innerHTML = '📞 Send Call';
+            }
+        }
+
+        // Update active calls
+        async function updateActiveCalls() {
+            try {
+                const response = await fetch('/api/active-calls');
+                const data = await response.json();
+                
+                const activeCallsDiv = document.getElementById('activeCalls');
+                if (data.calls && data.calls.length > 0) {
+                    activeCallsDiv.innerHTML = data.calls.map(call => `
+                        <div style="padding: 15px; margin: 10px 0; background: white; border-radius: 8px; border-left: 4px solid #667eea;">
+                            <strong>Call ID:</strong> ${call.callId}<br>
+                            <strong>Status:</strong> ${call.status}<br>
+                            <strong>PDF:</strong> ${call.pdfId || 'None'}
+                        </div>
+                    `).join('');
+                } else {
+                    activeCallsDiv.innerHTML = '<p style="color: #666;">No active calls</p>';
+                }
+            } catch (error) {
+                console.error('Error fetching active calls:', error);
+            }
+        }
+
+        // Show status message
+        function showStatus(elementId, message, type) {
+            const statusEl = document.getElementById(elementId);
+            statusEl.textContent = message;
+            statusEl.className = `status ${type} show`;
+            setTimeout(() => {
+                statusEl.classList.remove('show');
+            }, 5000);
+        }
+
+        // Auto-refresh active calls
+        setInterval(updateActiveCalls, 5000);
+        updateActiveCalls();
+    </script>
+</body>
+</html>
+
