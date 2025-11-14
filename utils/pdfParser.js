@@ -6,7 +6,9 @@
 // pdf-parse uses CommonJS, so we need to import it differently
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
-const pdfParse = require('pdf-parse');
+const pdfParseModule = require('pdf-parse');
+// pdf-parse exports an object, the function is in PDFParse property
+const pdfParse = pdfParseModule.PDFParse || pdfParseModule;
 
 class PDFParser {
   /**
