@@ -7,8 +7,8 @@
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const pdfParseModule = require('pdf-parse');
-// pdf-parse exports an object, the function is in PDFParse property
-const pdfParse = pdfParseModule.PDFParse || pdfParseModule;
+// pdf-parse exports an object, the class is in PDFParse property
+const PDFParse = pdfParseModule.PDFParse;
 
 class PDFParser {
   /**
@@ -18,14 +18,21 @@ class PDFParser {
    */
   async parsePDF(pdfBuffer) {
     try {
-      const data = await pdfParse(pdfBuffer);
+      // Create PDFParse instance with buffer
+      const pdfInstance = new PDFParse({ data: pdfBuffer });
+      
+      // Get text content
+      const textData = await pdfInstance.getText();
+      
+      // Get info/metadata
+      const infoData = await pdfInstance.getInfo();
       
       return {
-        text: data.text,
-        numPages: data.numpages,
-        info: data.info,
-        metadata: data.metadata,
-        textLength: data.text.length
+        text: textData.text,
+        numPages: textData.total,
+        info: infoData.info,
+        metadata: infoData.metadata,
+        textLength: textData.text.length
       };
     } catch (error) {
       console.error('Error parsing PDF:', error);
