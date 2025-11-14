@@ -172,7 +172,8 @@ function handleVoicebotConnect(req, res) {
     // Use CustomField (callLogId) if available, otherwise use CallSid
     const callIdentifier = customField || callSid;
     // Exotel WebSocket endpoint - supports both /voicebot/ws and /voice-stream paths
-    const wsPath = process.env.WS_PATH || '/voicebot/ws';
+    // Default to /voice-stream if WS_PATH not set (matches Exotel flow configuration)
+    const wsPath = process.env.WS_PATH || '/voice-stream';
     const websocketUrl = `${wsProtocol}://${wsHost}${wsPath}?call_id=${callIdentifier}`;
     
     // Return JSON response with WebSocket URL (matches backendRef pattern)
@@ -207,8 +208,10 @@ function verifyWebSocketClient(info) {
   const path = url.pathname;
   
   // Determine the expected WebSocket path for Exotel Voicebot
+  // Supports both /voicebot/ws and /voice-stream paths
   const voicebotWsPath = process.env.WS_PATH || '/voicebot/ws';
-  const isExotelVoicebot = path === voicebotWsPath;
+  const voiceStreamPath = '/voice-stream';
+  const isExotelVoicebot = path === voicebotWsPath || path === voiceStreamPath;
   
   // Exotel Voicebot connections do NOT require Authorization header
   if (isExotelVoicebot) {
@@ -795,11 +798,10 @@ server.listen(PORT, () => {
   console.log(`🚀 Exotel Voicebot Caller Server running on port ${PORT}`);
   console.log(`📞 POST /call to initiate a call`);
   console.log(`❤️  GET /health for health check`);
-  console.log(`🔌 WebSocket Server: ws://localhost:${PORT}/voicebot/ws`);
+  const voicebotWsPath = process.env.WS_PATH || '/voice-stream';
+  console.log(`🔌 WebSocket Server: ws://localhost:${PORT}${voicebotWsPath}`);
   console.log(`📡 Voicebot Connect: http://localhost:${PORT}/api/v1/exotel/voice/connect`);
   console.log(`📊 Active Sessions: http://localhost:${PORT}/voicebot/sessions`);
-  
-  const voicebotWsPath = process.env.WS_PATH || '/voicebot/ws';
   if (process.env.EXOTEL_WS_TOKEN) {
     console.log(`🔐 WebSocket authentication: ENABLED`);
     console.log(`   Exotel Voicebot path (${voicebotWsPath}): Authentication BYPASSED`);
