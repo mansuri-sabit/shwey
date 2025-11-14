@@ -29,3 +29,6 @@ backendRef/
 uploads/
 *.pdf
 
+# Binary files
+ngrok.exe
+
